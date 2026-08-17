@@ -1,0 +1,4 @@
+[alias]
+quality = "clippy --all-targets --all-features -- -D warnings"
+verify = "test --all-targets --all-features"
+
