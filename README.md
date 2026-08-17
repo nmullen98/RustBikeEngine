@@ -96,6 +96,7 @@ silently producing unstable output.
 
 - [`docs/CODE_GUIDE.md`](docs/CODE_GUIDE.md) — source-module responsibilities and runtime flow.
 - [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) — every editable TOML parameter and unit.
+- [`docs/AUDIO_DESIGN.md`](docs/AUDIO_DESIGN.md) — procedural sound model, research basis and limits.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — boundaries, accuracy model, and next stages.
 - [`docs/PHYSICS_REVIEW.md`](docs/PHYSICS_REVIEW.md) — reviewed assumptions and known limits.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — development and change rules.

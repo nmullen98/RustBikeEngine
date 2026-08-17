@@ -181,9 +181,11 @@ struct EngineSynth {
     secondary_phase: f32,
     intake_phase: f32,
     mechanical_phase: f32,
+    firing_phase: f32,
     combustion_envelope: f32,
     exhaust_envelope: f32,
     intake_envelope: f32,
+    overrun_envelope: f32,
     noise_state: u32,
     event_counter: u32,
     smoothed_rpm: f32,
@@ -211,9 +213,11 @@ impl EngineSynth {
             secondary_phase: 0.0,
             intake_phase: 0.0,
             mechanical_phase: 0.0,
+            firing_phase: 0.0,
             combustion_envelope: 0.0,
             exhaust_envelope: 0.0,
             intake_envelope: 0.0,
+            overrun_envelope: 0.0,
             noise_state: 0x8a5c_39e1,
             event_counter: 0,
             smoothed_rpm: 0.0,
@@ -260,7 +264,7 @@ impl EngineSynth {
 
     fn next_sample(&mut self, ignition: bool, combusting: bool, gear: u8) -> [f32; 2] {
         let revolutions_per_second = self.smoothed_rpm / 60.0;
-        let firing_hz = revolutions_per_second * self.cylinders * 0.5;
+        let firing_hz = firing_frequency_hz(self.smoothed_rpm, self.cylinders);
         let previous_phase = self.cycle_phase;
         self.cycle_phase += revolutions_per_second / self.sample_rate;
         let wrapped = self.cycle_phase >= 2.0;
@@ -285,25 +289,37 @@ impl EngineSynth {
                 self.exhaust_envelope = (self.exhaust_envelope + strength * 0.75).min(1.5);
                 self.intake_envelope =
                     (self.intake_envelope + strength * self.smoothed_throttle * 0.45).min(1.0);
-            } else if ignition
-                && self.smoothed_braking > 0.35
-                && self.event_counter.is_multiple_of(13)
-            {
-                // Sparse deterministic overrun pops; fuel-cut overrun is otherwise quiet.
-                self.combustion_envelope = self.smoothed_braking * 0.10;
-                self.exhaust_envelope =
-                    (self.exhaust_envelope + self.smoothed_braking * 0.16).min(0.35);
+            } else if self.smoothed_rpm > 260.0 {
+                // Closed-throttle cylinders still pump gas and excite exhaust, valvetrain,
+                // and rotating mechanical noise at every firing-order interval. This is not
+                // combustion: it is deliberately quieter and load-sensitive during overrun.
+                let residual = 0.06
+                    + (self.smoothed_rpm / 12_000.0).clamp(0.0, 1.0) * 0.12
+                    + self.smoothed_braking * 0.20;
+                self.overrun_envelope = (self.overrun_envelope + residual).min(0.48);
+                self.exhaust_envelope = (self.exhaust_envelope + residual * 0.34).min(0.62);
+                if ignition && self.smoothed_braking > 0.50 && self.event_counter.is_multiple_of(17)
+                {
+                    // Rare, restrained fuel-cut pop: a texture detail, not the main overrun sound.
+                    self.combustion_envelope = self.smoothed_braking * 0.07;
+                    self.exhaust_envelope =
+                        (self.exhaust_envelope + self.smoothed_braking * 0.12).min(0.70);
+                }
             }
         }
 
+        // Engine orders carry perceived pitch: every four-stroke firing event is
+        // one half crank revolution per cylinder. The order phase therefore rises
+        // directly with RPM instead of relying on fixed-frequency oscillators.
+        self.firing_phase = wrap_phase(self.firing_phase + TAU * firing_hz / self.sample_rate);
         self.primary_phase = wrap_phase(
-            self.primary_phase + TAU * (self.primary_hz + firing_hz * 0.12) / self.sample_rate,
+            self.primary_phase + TAU * (self.primary_hz + firing_hz * 0.72) / self.sample_rate,
         );
         self.secondary_phase = wrap_phase(
-            self.secondary_phase + TAU * (self.secondary_hz + firing_hz * 0.07) / self.sample_rate,
+            self.secondary_phase + TAU * (self.secondary_hz + firing_hz * 1.30) / self.sample_rate,
         );
         self.intake_phase = wrap_phase(
-            self.intake_phase + TAU * (self.intake_hz + firing_hz * 0.09) / self.sample_rate,
+            self.intake_phase + TAU * (self.intake_hz + firing_hz * 0.90) / self.sample_rate,
         );
         self.mechanical_phase =
             wrap_phase(self.mechanical_phase + TAU * revolutions_per_second / self.sample_rate);
@@ -317,8 +333,9 @@ impl EngineSynth {
             wrap_phase(self.transmission_phase + TAU * transmission_hz / self.sample_rate);
 
         self.combustion_envelope *= (-1.0 / (self.sample_rate * 0.009)).exp();
-        self.exhaust_envelope *= (-1.0 / (self.sample_rate * 0.070)).exp();
+        self.exhaust_envelope *= (-1.0 / (self.sample_rate * 0.095)).exp();
         self.intake_envelope *= (-1.0 / (self.sample_rate * 0.040)).exp();
+        self.overrun_envelope *= (-1.0 / (self.sample_rate * 0.140)).exp();
 
         // Xorshift noise supplies the short, broadband combustion transient.
         self.noise_state ^= self.noise_state << 13;
@@ -328,20 +345,31 @@ impl EngineSynth {
         let noise = (f32::from(upper_noise) / f32::from(u16::MAX)) * 2.0 - 1.0;
 
         let combustion = noise * self.combustion_envelope * 0.24;
-        let exhaust = self.exhaust_envelope
-            * (self.primary_phase.sin() * 0.46 + self.secondary_phase.sin() * 0.19);
+        let firing_order = self.firing_phase.sin()
+            + (self.firing_phase * 2.0).sin() * 0.46
+            + (self.firing_phase * 3.0).sin() * 0.18;
+        let speed_level = (self.smoothed_rpm / 12_000.0).clamp(0.0, 1.0);
+        let exhaust_order_level = 0.030
+            + speed_level * 0.055
+            + self.smoothed_combustion * 0.19
+            + self.overrun_envelope * 0.16;
+        let exhaust_order = firing_order * exhaust_order_level;
+        let exhaust_resonance = self.exhaust_envelope
+            * (self.primary_phase.sin() * 0.30 + self.secondary_phase.sin() * 0.14);
+        let exhaust = exhaust_order + exhaust_resonance;
         let intake = self.intake_envelope * self.intake_phase.sin() * 0.22;
-        let speed_level = (self.smoothed_rpm / 10_000.0).clamp(0.0, 1.0);
-        let mechanical = (self.mechanical_phase.sin() + (self.mechanical_phase * 2.0).sin() * 0.32)
-            * speed_level
-            * 0.028;
+        let mechanical = (self.mechanical_phase.sin() * 0.55
+            + (self.mechanical_phase * 2.0).sin() * 0.32
+            + (self.mechanical_phase * 4.0).sin() * 0.13)
+            * (0.010 + speed_level * 0.040);
+        let overrun_airflow = noise * self.overrun_envelope * (0.018 + speed_level * 0.020);
         let transmission_level = if gear == 0 {
             0.0
         } else {
             (self.smoothed_output_rpm / 1200.0).clamp(0.0, 1.0) * 0.045
         };
         let transmission = self.transmission_phase.sin() * transmission_level;
-        let centre = combustion + exhaust + intake + mechanical + transmission;
+        let centre = combustion + exhaust + intake + mechanical + overrun_airflow + transmission;
         let stereo_detail = self.secondary_phase.sin() * self.exhaust_envelope * 0.025;
         [
             soft_clip((centre - stereo_detail) * 0.58),
@@ -367,6 +395,11 @@ fn firing_pattern(engine: &EngineConfig) -> ([f32; 8], usize) {
     (offsets, count)
 }
 
+/// Returns the four-stroke firing order frequency for an RPM and cylinder count.
+fn firing_frequency_hz(rpm: f32, cylinders: f32) -> f32 {
+    (rpm.max(0.0) / 60.0) * cylinders * 0.5
+}
+
 fn soft_clip(value: f32) -> f32 {
     value / (1.0 + value.abs())
 }
@@ -388,7 +421,7 @@ fn sample_rate_f32(value: u32) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use super::firing_pattern;
+    use super::{AudioSnapshot, EngineSynth, firing_frequency_hz, firing_pattern};
     use crate::config::EngineConfig;
 
     #[test]
@@ -401,5 +434,40 @@ mod tests {
         assert!((offsets[1] - 0.5).abs() < f32::EPSILON);
         assert!((offsets[2] - 1.0).abs() < f32::EPSILON);
         assert!((offsets[3] - 1.5).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn firing_order_pitch_rises_linearly_with_rpm() {
+        let idle_hz = firing_frequency_hz(1_500.0, 4.0);
+        let redline_hz = firing_frequency_hz(12_000.0, 4.0);
+
+        assert!((idle_hz - 50.0).abs() < f32::EPSILON);
+        assert!((redline_hz - 400.0).abs() < f32::EPSILON);
+        assert!(redline_hz > idle_hz);
+    }
+
+    #[test]
+    fn closed_throttle_overrun_keeps_audible_engine_orders() {
+        let engine = EngineConfig::load_default().expect("valid engine");
+        let mut synth = EngineSynth::new(48_000.0, &engine);
+        let mut output = vec![0.0_f32; 4_800];
+        synth.render(
+            &mut output,
+            2,
+            AudioSnapshot {
+                rpm: 6_000.0,
+                throttle: 0.0,
+                combustion: 0.0,
+                braking: 0.85,
+                output_rpm: 450.0,
+                ratio: 9.0,
+                gear: 3,
+                ignition: true,
+                combusting: false,
+            },
+        );
+
+        let peak = output.iter().copied().map(f32::abs).fold(0.0, f32::max);
+        assert!(peak > 0.015, "overrun peak={peak:.4}");
     }
 }
