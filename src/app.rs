@@ -410,6 +410,7 @@ impl EngineApp {
                 &format!("{:.1} km/h", gearbox.road_speed_kph),
             );
         });
+        show_traction_warning(ui, gearbox);
         if gearbox.selected_gear > 0 {
             ui.small(format!(
                 "Clutch slip: {:+.0} rpm  •  release the clutch gradually to load the engine",
@@ -428,10 +429,10 @@ impl EngineApp {
         draw_bike(
             ui,
             gearbox.road_speed_kph,
+            gearbox.distance_m,
             state.engine_braking_torque_nm,
             state.effective_throttle,
             gearbox.selected_gear,
-            ui.ctx().input(|input| input.time),
         );
         ui.add_space(10.0);
         draw_component_overview(ui, state, gearbox, config);
@@ -618,7 +619,14 @@ fn draw_component_overview(
         ),
         (
             "CHAIN / FINAL",
-            format!("{:+.0} Nm", gearbox.rear_wheel_torque_nm),
+            if gearbox.traction_limited {
+                format!(
+                    "{:+.0} / {:+.0} Nm",
+                    gearbox.rear_wheel_torque_nm, gearbox.requested_rear_wheel_torque_nm
+                )
+            } else {
+                format!("{:+.0} Nm", gearbox.rear_wheel_torque_nm)
+            },
         ),
         ("REAR TYRE", format!("{:.1} km/h", gearbox.road_speed_kph)),
         (
@@ -637,7 +645,9 @@ fn draw_component_overview(
             egui::Rect::from_min_size(egui::pos2(left, top), Vec2::new(node_width, node_height));
         let accent = if index == 1 && !state.is_running() {
             Color32::from_rgb(226, 75, 70)
-        } else if index == 2 && gearbox.clutch_slip_rpm.abs() > 500.0 {
+        } else if (index == 2 && gearbox.clutch_slip_rpm.abs() > 500.0)
+            || (index == 4 && gearbox.traction_limited)
+        {
             Color32::from_rgb(240, 170, 74)
         } else {
             Color32::from_rgb(57, 190, 154)
@@ -675,6 +685,21 @@ fn draw_component_overview(
         ),
         exhaust.center_top(),
     );
+}
+
+fn show_traction_warning(
+    ui: &mut egui::Ui,
+    gearbox: motorbike_engine_sim::simulation::GearboxState,
+) {
+    if gearbox.traction_limited {
+        ui.colored_label(
+            Color32::from_rgb(240, 170, 74),
+            format!(
+                "Traction limit: requested {:+.0} Nm, applied {:+.0} Nm",
+                gearbox.requested_rear_wheel_torque_nm, gearbox.rear_wheel_torque_nm
+            ),
+        );
+    }
 }
 
 fn component_node(
@@ -740,10 +765,10 @@ struct BikeVisualState {
 fn draw_bike(
     ui: &mut egui::Ui,
     road_speed_kph: f64,
+    distance_m: f64,
     engine_braking_nm: f64,
     throttle: f64,
     gear: u8,
-    time_seconds: f64,
 ) {
     let width = ui.available_width();
     let (response, painter) = ui.allocate_painter(Vec2::new(width, 190.0), egui::Sense::hover());
@@ -754,7 +779,6 @@ fn draw_bike(
         Color32::from_rgb(11, 15, 19),
     );
     let road_y = rect.bottom() - 47.0;
-    let distance_m = (road_speed_kph / 3.6 * time_seconds).max(0.0);
     draw_ground(&painter, rect, road_y, distance_m);
 
     // The bike is deliberately fixed at the centre; only the world moves.

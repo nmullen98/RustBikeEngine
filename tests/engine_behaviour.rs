@@ -224,6 +224,56 @@ fn stationary_clutch_release_reports_gear_load_response() {
 }
 
 #[test]
+fn tyre_grip_caps_rear_wheel_torque() {
+    let config = EngineConfig::load_default().expect("valid engine");
+    let maximum_tyre_torque = config.gearbox.max_tyre_torque_nm();
+    let mut engine = EngineSimulation::new(config);
+    engine.set_inputs(EngineInputs {
+        ignition: true,
+        starter: true,
+        ..EngineInputs::default()
+    });
+    run_steps(&mut engine, 2_000);
+    engine.set_inputs(EngineInputs {
+        ignition: true,
+        throttle: 1.0,
+        gear: 1,
+        clutch_engagement: 1.0,
+        ..EngineInputs::default()
+    });
+    run_steps(&mut engine, 5);
+    let gearbox = engine.gearbox_state();
+
+    assert!(gearbox.traction_limited);
+    assert!(gearbox.requested_rear_wheel_torque_nm > maximum_tyre_torque);
+    assert!(gearbox.rear_wheel_torque_nm <= maximum_tyre_torque + f64::EPSILON);
+}
+
+#[test]
+fn distance_is_integrated_from_rear_wheel_motion() {
+    let mut engine = EngineSimulation::new(EngineConfig::load_default().expect("valid engine"));
+    assert!(engine.gearbox_state().distance_m.abs() < f64::EPSILON);
+    engine.set_inputs(EngineInputs {
+        ignition: true,
+        starter: true,
+        ..EngineInputs::default()
+    });
+    run_steps(&mut engine, 2_000);
+    engine.set_inputs(EngineInputs {
+        ignition: true,
+        throttle: 0.75,
+        gear: 1,
+        clutch_engagement: 1.0,
+        ..EngineInputs::default()
+    });
+    run_steps(&mut engine, 500);
+
+    let gearbox = engine.gearbox_state();
+    assert!(gearbox.road_speed_kph > 0.0);
+    assert!(gearbox.distance_m > 0.0);
+}
+
+#[test]
 fn four_stroke_cycle_exposes_four_180_degree_phases() {
     assert_eq!(FourStroke::from_cycle_angle(0.0), FourStroke::Intake);
     assert_eq!(FourStroke::from_cycle_angle(TAU * 0.49), FourStroke::Intake);

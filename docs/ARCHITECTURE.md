@@ -38,10 +38,11 @@ generated from firing events, damped exhaust modes, combustion noise and a mecha
 The bundled inline four uses even 180-degree firing intervals; intake and exhaust envelopes are
 separate, and fuel-cut overrun only produces sparse deterministic pops.
 
-The dashboard's bike strip uses the simulated wheel speed. Crank and wheel inertia are separate;
-clutch capacity and slip transfer torque through the selected ratio, including a low-rpm stall
-guard when a fully coupled tall gear overwhelms the idle torque reserve, while a fixed rear-axle
-normal load produces tarmac rolling resistance and aerodynamic drag acts at the wheel. This makes
+The dashboard's bike strip uses simulated, integrated travel distance. Crank and wheel inertia are
+separate; clutch capacity and slip transfer torque through the selected ratio, including a low-rpm
+stall guard when a fully coupled tall gear overwhelms the idle torque reserve. A fixed rear-axle
+normal load produces tarmac rolling resistance, speed-dependent aerodynamic drag acts at the
+wheel, and a static dry-tarmac friction cap prevents impossible drive or braking torque. This makes
 pull-away, shifts and engine braking causal without an artificial user-controlled dyno load.
 
 It deliberately does **not** claim cylinder-pressure, thermal, emissions, lubrication or

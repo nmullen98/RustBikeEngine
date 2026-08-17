@@ -72,6 +72,9 @@ impl AudioEngine {
         })
     }
 
+    /// Publishes the latest simulation snapshot to the audio callback without locking.
+    ///
+    /// This function performs only atomic stores and is safe to call once per GUI frame.
     pub fn update(&self, state: EngineState, gearbox: GearboxState, ignition: bool) {
         self.controls
             .rpm_bits

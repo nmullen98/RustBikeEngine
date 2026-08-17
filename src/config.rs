@@ -1,49 +1,86 @@
+//! Validated, data-only engine and gearbox calibration profiles.
+//!
+//! Profiles are deserialised from TOML, then bounded before entering the
+//! simulation. No profile value is executed as code.
+
 use serde::Deserialize;
 use std::fmt;
 
 /// Editable motorcycle transmission parameters.
 #[derive(Debug, Clone, Deserialize)]
 pub struct GearboxConfig {
+    /// Crankshaft-to-gearbox-input reduction ratio.
     pub primary_reduction: f64,
+    /// Forward gear ratios, ordered from first through top gear.
     pub gear_ratios: Vec<f64>,
+    /// Front-sprocket-to-rear-sprocket reduction ratio.
     pub final_drive_ratio: f64,
+    /// Fraction of drivetrain torque delivered after gearbox and chain losses.
     pub transmission_efficiency: f64,
+    /// Loaded rear-tyre rolling radius in metres.
     pub rear_wheel_radius_m: f64,
     /// Static normal load carried by the driven rear tyre.
     pub rear_axle_load_kg: f64,
     /// Dimensionless tyre/tarmac rolling-resistance coefficient.
     pub tyre_rolling_resistance_coefficient: f64,
+    /// Dimensionless peak longitudinal friction coefficient for the rear tyre.
+    pub tyre_peak_friction_coefficient: f64,
+    /// Total motorcycle mass reflected into longitudinal wheel inertia, in kg.
     pub vehicle_mass_kg: f64,
+    /// Physical rear-wheel rotational inertia, in kg·m².
     pub wheel_inertia_kg_m2: f64,
+    /// Aerodynamic resistance torque at 100 km/h, in N·m.
     pub aero_drag_nm_at_100_kph: f64,
+    /// Maximum clutch torque at full lever release, in N·m.
     pub clutch_capacity_nm: f64,
+    /// Clutch torque per crank/wheel slip speed, in N·m per rad/s.
     pub clutch_stiffness_nm_per_rad_s: f64,
 }
 
 /// Parameters that describe one engine build.
 #[derive(Debug, Clone, Deserialize)]
 pub struct EngineConfig {
+    /// Human-readable profile name shown by the UI.
     pub name: String,
+    /// Firing-layout identifier used by the simulation and audio model.
     pub layout: String,
+    /// Number of cylinders represented by the profile.
     pub cylinders: u8,
+    /// Number of strokes in the engine cycle; the current solver accepts four.
     pub cycle_strokes: u8,
+    /// Total swept displacement, in cubic centimetres.
     pub displacement_cc: f64,
     /// Calibration displacement for torque, pumping loss, and rotating inertia values.
     pub reference_displacement_cc: f64,
+    /// Cylinder bore, in millimetres.
     pub bore_mm: f64,
+    /// Crank stroke, in millimetres.
     pub stroke_mm: f64,
+    /// Geometric compression ratio.
     pub compression_ratio: f64,
+    /// Target warm idle speed, in revolutions per minute.
     pub idle_rpm: f64,
+    /// Hard engine-speed ceiling, in revolutions per minute.
     pub redline_rpm: f64,
+    /// Flywheel inertia, in kg·m².
     pub flywheel_inertia_kg_m2: f64,
+    /// Other rotating assembly inertia at the reference displacement, in kg·m².
     pub rotating_inertia_kg_m2: f64,
+    /// Calibrated mean peak crank torque, in N·m.
     pub max_torque_nm: f64,
+    /// Engine speed at the torque-curve peak, in revolutions per minute.
     pub peak_torque_rpm: f64,
+    /// Mechanical friction torque at idle speed, in N·m.
     pub friction_nm_at_idle: f64,
+    /// Mechanical friction torque at redline, in N·m.
     pub friction_nm_at_redline: f64,
+    /// Maximum closed-throttle pumping loss, in N·m.
     pub max_pumping_brake_nm: f64,
+    /// Cranking torque supplied by the starter motor, in N·m.
     pub starter_torque_nm: f64,
+    /// Minimum idle-controller throttle demand, from zero to one.
     pub idle_base_throttle: f64,
+    /// Proportional idle-controller gain, from zero to one.
     pub idle_control_gain: f64,
     /// Ambient pressure used by the simplified intake manifold model.
     pub ambient_pressure_kpa: f64,
@@ -53,12 +90,17 @@ pub struct EngineConfig {
     pub throttle_response_seconds: f64,
     /// First-order intake manifold filling time.
     pub manifold_fill_seconds: f64,
+    /// Primary exhaust resonator frequency used by procedural audio, in Hz.
     pub exhaust_primary_hz: f64,
+    /// Secondary exhaust resonator frequency used by procedural audio, in Hz.
     pub exhaust_secondary_hz: f64,
+    /// Intake resonator frequency used by procedural audio, in Hz.
     pub intake_resonance_hz: f64,
+    /// Transmission and tyre calibration paired with this engine profile.
     pub gearbox: GearboxConfig,
 }
 
+/// Error returned when a profile cannot be parsed or fails physical bounds checks.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfigError(String);
 
@@ -170,21 +212,25 @@ impl EngineConfig {
     }
 
     #[must_use]
+    /// Returns the crank inertia including displacement-scaled rotating parts.
     pub fn total_inertia_kg_m2(&self) -> f64 {
         self.flywheel_inertia_kg_m2 + self.rotating_inertia_kg_m2 * self.displacement_scale()
     }
 
     #[must_use]
+    /// Returns peak torque scaled from the reference to the active displacement.
     pub fn effective_max_torque_nm(&self) -> f64 {
         self.max_torque_nm * self.displacement_scale()
     }
 
     #[must_use]
+    /// Returns pumping-brake torque scaled from the reference displacement.
     pub fn effective_max_pumping_brake_nm(&self) -> f64 {
         self.max_pumping_brake_nm * self.displacement_scale()
     }
 
     #[must_use]
+    /// Returns active displacement divided by calibration displacement.
     pub fn displacement_scale(&self) -> f64 {
         self.displacement_cc / self.reference_displacement_cc
     }
@@ -241,6 +287,12 @@ impl GearboxConfig {
             0.005,
             0.04,
         )?;
+        require_range(
+            "gearbox.tyre_peak_friction_coefficient",
+            self.tyre_peak_friction_coefficient,
+            0.4,
+            1.5,
+        )?;
         require_range("gearbox.vehicle_mass_kg", self.vehicle_mass_kg, 80.0, 500.0)?;
         require_range(
             "gearbox.wheel_inertia_kg_m2",
@@ -263,11 +315,13 @@ impl GearboxConfig {
     }
 
     #[must_use]
+    /// Returns the number of configured forward gears.
     pub fn forward_gears(&self) -> u8 {
         u8::try_from(self.gear_ratios.len()).unwrap_or(u8::MAX)
     }
 
     #[must_use]
+    /// Returns the primary × selected gear × final-drive reduction, or `None` for neutral.
     pub fn overall_ratio(&self, gear: u8) -> Option<f64> {
         let index = usize::from(gear.checked_sub(1)?);
         self.gear_ratios
@@ -276,15 +330,26 @@ impl GearboxConfig {
     }
 
     #[must_use]
+    /// Returns rear-wheel and reflected vehicle inertia at the wheel axis, in kg·m².
     pub fn wheel_inertia_kg_m2(&self) -> f64 {
         self.wheel_inertia_kg_m2 + self.vehicle_mass_kg * self.rear_wheel_radius_m.powi(2)
     }
 
     #[must_use]
+    /// Returns static rolling-resistance torque at the rear wheel, in N·m.
     pub fn static_tarmac_load_torque_nm(&self) -> f64 {
         self.rear_axle_load_kg
             * 9.81
             * self.tyre_rolling_resistance_coefficient
+            * self.rear_wheel_radius_m
+    }
+
+    /// Maximum longitudinal tyre torque from the configured static rear load.
+    #[must_use]
+    pub fn max_tyre_torque_nm(&self) -> f64 {
+        self.rear_axle_load_kg
+            * 9.81
+            * self.tyre_peak_friction_coefficient
             * self.rear_wheel_radius_m
     }
 }
@@ -316,5 +381,6 @@ mod tests {
         let config = EngineConfig::load_default().expect("bundled profile should be valid");
         assert!((config.redline_rpm - 12_000.0).abs() < f64::EPSILON);
         assert!((config.gearbox.static_tarmac_load_torque_nm() - 5.10).abs() < 0.05);
+        assert!((config.gearbox.max_tyre_torque_nm() - 357.0).abs() < 1.0);
     }
 }
