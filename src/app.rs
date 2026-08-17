@@ -346,15 +346,7 @@ impl EngineApp {
                 "ENGINE BRAKING",
                 &format!("{:.1} Nm", state.engine_braking_torque_nm),
             );
-            metric(
-                ui,
-                "STATE",
-                if state.is_running() {
-                    "Running"
-                } else {
-                    "Stopped / cranking"
-                },
-            );
+            metric(ui, "STATE", engine_status_label(state));
         });
 
         ui.add_space(12.0);
@@ -511,6 +503,16 @@ fn metric(ui: &mut egui::Ui, label: &str, value: &str) {
         ui.label(RichText::new(label).small().color(Color32::from_gray(150)));
         ui.label(RichText::new(value).size(20.0).strong());
     });
+}
+
+fn engine_status_label(state: motorbike_engine_sim::simulation::EngineState) -> &'static str {
+    if state.stalled {
+        "Stalled — pull clutch, hold Starter"
+    } else if state.is_running() {
+        "Running"
+    } else {
+        "Stopped / cranking"
+    }
 }
 
 fn draw_engine(ui: &mut egui::Ui, crank_angle: f64, throttle: f64, cylinders: u8, layout: &str) {

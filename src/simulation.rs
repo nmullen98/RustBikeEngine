@@ -9,6 +9,7 @@ use std::f64::consts::TAU;
 const RPM_PER_RADIAN_PER_SECOND: f64 = 60.0 / TAU;
 const COMBUSTION_CUTOFF_RPM: f64 = 280.0;
 const COMBUSTION_FULL_RPM: f64 = 650.0;
+const STALL_EXPOSURE_SECONDS: f64 = 0.12;
 const FOUR_STROKE_CYCLE_RADIANS: f64 = TAU * 2.0;
 const POWER_STROKE_RADIANS: f64 = TAU * 0.5;
 
@@ -112,6 +113,11 @@ pub struct EngineState {
     pub net_torque_nm: f64,
     /// Air-charge proxy after intake lag and idle control, from zero to one.
     pub effective_throttle: f64,
+    /// Whether clutch load reduced the engine below sustainable combustion speed.
+    ///
+    /// A stalled engine remains off until it is cranked or bump-started above
+    /// the combustion relight speed.
+    pub stalled: bool,
 }
 
 /// Derived gearbox and rear-wheel measurements for the current engine state.
@@ -162,6 +168,8 @@ pub struct EngineSimulation {
     rear_wheel_torque_nm: f64,
     traction_limited: bool,
     distance_m: f64,
+    stall_exposure_seconds: f64,
+    stalled: bool,
 }
 
 impl EngineSimulation {
@@ -183,6 +191,8 @@ impl EngineSimulation {
             rear_wheel_torque_nm: 0.0,
             traction_limited: false,
             distance_m: 0.0,
+            stall_exposure_seconds: 0.0,
+            stalled: false,
         }
     }
 
@@ -280,7 +290,10 @@ impl EngineSimulation {
         let (effective_throttle, manifold_air_fraction) =
             self.update_intake_air(dt_seconds, rpm, idle_throttle, overrun_fuel_cut);
 
-        let combustion_ramp = if self.inputs.ignition && !overrun_fuel_cut {
+        let combustion_enabled = self.inputs.ignition
+            && !overrun_fuel_cut
+            && (!self.stalled || self.inputs.starter || rpm >= COMBUSTION_FULL_RPM);
+        let combustion_ramp = if combustion_enabled {
             ((rpm - COMBUSTION_CUTOFF_RPM) / (COMBUSTION_FULL_RPM - COMBUSTION_CUTOFF_RPM))
                 .clamp(0.0, 1.0)
         } else {
@@ -334,14 +347,14 @@ impl EngineSimulation {
         if next_rpm > self.config.redline_rpm {
             next_rpm = self.config.redline_rpm;
         }
-        // Idle control can catch a small dip, but it cannot create enough
-        // torque to keep a fully coupled engine turning in a tall gear. Once
-        // the crank falls below roughly 35% of idle speed, the combustion
-        // cycle loses stability and the engine stalls.
-        let fully_coupled = self.inputs.gear > 0 && self.inputs.clutch_engagement >= 0.85;
-        if fully_coupled && !self.inputs.starter && next_rpm < self.config.idle_rpm * 0.35 {
-            next_rpm = 0.0;
-        }
+        next_rpm = self.resolve_stall(
+            dt_seconds,
+            next_rpm,
+            combustion_torque,
+            starter_torque,
+            engine_braking_torque,
+            clutch_torque,
+        );
         if next_rpm < 15.0 && !self.inputs.starter && combustion_torque == 0.0 {
             next_rpm = 0.0;
         }
@@ -363,6 +376,7 @@ impl EngineSimulation {
             clutch_torque_nm: clutch_torque,
             net_torque_nm: net_torque,
             effective_throttle,
+            stalled: self.stalled,
         };
     }
 
@@ -461,6 +475,56 @@ impl EngineSimulation {
         self.config.effective_max_pumping_brake_nm()
             * (1.0 - throttle).powi(2)
             * speed_fraction.powf(1.15)
+    }
+
+    fn combustion_stability_rpm(&self) -> f64 {
+        (self.config.idle_rpm * 0.45).max(COMBUSTION_CUTOFF_RPM)
+    }
+
+    fn resolve_stall(
+        &mut self,
+        dt_seconds: f64,
+        mut next_rpm: f64,
+        combustion_torque: f64,
+        starter_torque: f64,
+        engine_braking_torque: f64,
+        clutch_torque: f64,
+    ) -> f64 {
+        // Clutch release can load the crank faster than the idle controller and
+        // four-stroke combustion can recover it. Sustained sub-idle operation
+        // under a positive clutch load extinguishes combustion. The exposure
+        // time avoids turning a short torque-pulse dip into an artificial stall.
+        let clutch_load_torque = clutch_torque.max(0.0);
+        let resisting_torque = engine_braking_torque + clutch_load_torque;
+        let combustion_support_torque = combustion_torque + starter_torque;
+        let low_speed_load = self.inputs.gear > 0
+            && self.inputs.clutch_engagement >= 0.20
+            && clutch_load_torque > 0.0
+            && resisting_torque > combustion_support_torque;
+        let stability_rpm = self.combustion_stability_rpm();
+        if !self.inputs.starter && low_speed_load && next_rpm < stability_rpm {
+            self.stall_exposure_seconds += dt_seconds;
+        } else if next_rpm >= stability_rpm || !low_speed_load {
+            self.stall_exposure_seconds = 0.0;
+        }
+
+        let combustion_failed = !self.inputs.starter
+            && low_speed_load
+            && (next_rpm < COMBUSTION_CUTOFF_RPM
+                || self.stall_exposure_seconds >= STALL_EXPOSURE_SECONDS);
+        if combustion_failed {
+            next_rpm = 0.0;
+            self.stall_exposure_seconds = 0.0;
+            self.stalled = true;
+        } else if self.inputs.ignition
+            && next_rpm >= COMBUSTION_FULL_RPM
+            && (self.inputs.starter || self.stalled)
+        {
+            // Cranking or a sufficiently fast bump-start restores stable firing.
+            self.stalled = false;
+            self.stall_exposure_seconds = 0.0;
+        }
+        next_rpm
     }
 
     fn clutch_torque(&self, crank_angular_speed: f64) -> f64 {

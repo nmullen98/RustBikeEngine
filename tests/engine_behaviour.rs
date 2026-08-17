@@ -193,7 +193,69 @@ fn fully_engaged_top_gear_at_zero_speed_stalls_without_throttle() {
     });
     run_steps(&mut engine, 2_000);
 
-    assert!(engine.state().rpm < 300.0, "rpm={:.1}", engine.state().rpm);
+    assert!(engine.state().stalled, "rpm={:.1}", engine.state().rpm);
+    assert!(engine.state().rpm < 15.0, "rpm={:.1}", engine.state().rpm);
+}
+
+#[test]
+fn stalled_engine_stays_off_until_the_clutch_is_opened_and_starter_is_used() {
+    let mut engine = EngineSimulation::new(EngineConfig::load_default().expect("valid engine"));
+    engine.set_inputs(EngineInputs {
+        ignition: true,
+        starter: true,
+        ..EngineInputs::default()
+    });
+    run_steps(&mut engine, 2_000);
+    engine.set_inputs(EngineInputs {
+        ignition: true,
+        gear: 6,
+        clutch_engagement: 1.0,
+        ..EngineInputs::default()
+    });
+    run_steps(&mut engine, 2_000);
+    assert!(engine.state().stalled);
+
+    engine.set_inputs(EngineInputs {
+        ignition: true,
+        gear: 6,
+        clutch_engagement: 0.0,
+        ..EngineInputs::default()
+    });
+    run_steps(&mut engine, 1_000);
+    assert!(engine.state().stalled);
+    assert!(engine.state().rpm < 15.0);
+
+    engine.set_inputs(EngineInputs {
+        ignition: true,
+        starter: true,
+        gear: 6,
+        clutch_engagement: 0.0,
+        ..EngineInputs::default()
+    });
+    run_steps(&mut engine, 2_000);
+    assert!(!engine.state().stalled, "rpm={:.1}", engine.state().rpm);
+    assert!(engine.state().is_running(), "rpm={:.1}", engine.state().rpm);
+}
+
+#[test]
+fn open_clutch_prevents_a_stationary_tall_gear_from_loading_the_engine() {
+    let mut engine = EngineSimulation::new(EngineConfig::load_default().expect("valid engine"));
+    engine.set_inputs(EngineInputs {
+        ignition: true,
+        starter: true,
+        ..EngineInputs::default()
+    });
+    run_steps(&mut engine, 2_000);
+    engine.set_inputs(EngineInputs {
+        ignition: true,
+        gear: 6,
+        clutch_engagement: 0.0,
+        ..EngineInputs::default()
+    });
+    run_steps(&mut engine, 2_000);
+
+    assert!(!engine.state().stalled);
+    assert!(engine.state().is_running(), "rpm={:.1}", engine.state().rpm);
 }
 
 #[test]

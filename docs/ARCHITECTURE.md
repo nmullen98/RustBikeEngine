@@ -39,8 +39,9 @@ The bundled inline four uses even 180-degree firing intervals; intake and exhaus
 separate, and fuel-cut overrun only produces sparse deterministic pops.
 
 The dashboard's bike strip uses simulated, integrated travel distance. Crank and wheel inertia are
-separate; clutch capacity and slip transfer torque through the selected ratio, including a low-rpm
-stall guard when a fully coupled tall gear overwhelms the idle torque reserve. A fixed rear-axle
+separate; clutch capacity and slip transfer torque through the selected ratio. A low-speed
+combustion-stability exposure timer stalls the engine only after sustained positive clutch load,
+then latches it until cranking or bump-start recovery. A fixed rear-axle
 normal load produces tarmac rolling resistance, speed-dependent aerodynamic drag acts at the
 wheel, and a static dry-tarmac friction cap prevents impossible drive or braking torque. This makes
 pull-away, shifts and engine braking causal without an artificial user-controlled dyno load.
