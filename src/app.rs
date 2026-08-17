@@ -2,7 +2,7 @@ use eframe::egui::{self, Color32, RichText, Stroke, Vec2};
 use motorbike_engine_sim::{
     audio::AudioEngine, config::EngineConfig, simulation::EngineSimulation,
 };
-use std::{path::PathBuf, time::Instant};
+use std::time::Instant;
 
 const FIXED_STEP_SECONDS: f64 = 0.001;
 const MAX_FRAME_SECONDS: f64 = 0.05;
@@ -15,39 +15,20 @@ pub struct EngineApp {
     last_frame: Instant,
     accumulator: f64,
     paused: bool,
-    last_running: bool,
     draft_config: EngineConfig,
     config_dirty: bool,
     config_message: Option<(bool, String)>,
     keyboard_clutch_active: bool,
     clutch_before_keyboard: Option<f64>,
-    log_directory: PathBuf,
-    crash_log_path: PathBuf,
 }
 
 impl EngineApp {
-    pub fn new(
-        context: &eframe::CreationContext<'_>,
-        log_directory: PathBuf,
-        crash_log_path: PathBuf,
-    ) -> Self {
+    pub fn new(context: &eframe::CreationContext<'_>) -> Self {
         configure_style(&context.egui_ctx);
         let config = EngineConfig::load_default().expect("bundled engine profile must be valid");
-        tracing::info!(
-            engine = %config.name,
-            cylinders = config.cylinders,
-            displacement_cc = config.displacement_cc,
-            "engine profile loaded"
-        );
         let (audio, audio_error) = match AudioEngine::start(&config) {
-            Ok(audio) => {
-                tracing::info!("audio output started");
-                (Some(audio), None)
-            }
-            Err(error) => {
-                tracing::error!(%error, "audio output unavailable");
-                (None, Some(error))
-            }
+            Ok(audio) => (Some(audio), None),
+            Err(error) => (None, Some(error)),
         };
         let draft_config = config.clone();
         Self {
@@ -57,14 +38,11 @@ impl EngineApp {
             last_frame: Instant::now(),
             accumulator: 0.0,
             paused: false,
-            last_running: false,
             draft_config,
             config_dirty: false,
             config_message: None,
             keyboard_clutch_active: false,
             clutch_before_keyboard: None,
-            log_directory,
-            crash_log_path,
         }
     }
 
@@ -80,15 +58,6 @@ impl EngineApp {
         while self.accumulator >= FIXED_STEP_SECONDS {
             self.simulation.step(FIXED_STEP_SECONDS);
             self.accumulator -= FIXED_STEP_SECONDS;
-        }
-        let running = self.simulation.state().is_running();
-        if running != self.last_running {
-            tracing::info!(
-                running,
-                rpm = self.simulation.state().rpm,
-                "engine running state changed"
-            );
-            self.last_running = running;
         }
     }
 
@@ -116,7 +85,6 @@ impl EngineApp {
             inputs.throttle = (inputs.throttle - 0.05).max(0.0);
         }
         let shift_ready = space_down || inputs.clutch_engagement <= 0.1;
-        let previous_gear = inputs.gear;
         if shift_ready && shift_down && inputs.gear > 0 {
             inputs.gear = inputs.gear.saturating_sub(1);
         }
@@ -136,18 +104,10 @@ impl EngineApp {
         }
         self.keyboard_clutch_active = space_down;
         self.simulation.set_inputs(inputs);
-        if inputs.gear != previous_gear {
-            tracing::info!(
-                from = previous_gear,
-                to = inputs.gear,
-                "keyboard gear selected"
-            );
-        }
     }
 
     fn controls(&mut self, ui: &mut egui::Ui) {
         let mut inputs = self.simulation.inputs();
-        let previous_gear = inputs.gear;
         ui.heading("Controls");
         ui.add_space(8.0);
         ui.checkbox(&mut inputs.ignition, "Ignition");
@@ -205,9 +165,6 @@ impl EngineApp {
         clutch_hint(ui, shift_enabled, inputs.gear);
         ui.small("Keyboard: Up/Down = throttle, Space = pull clutch, Left/Right = shift");
         self.simulation.set_inputs(inputs);
-        if inputs.gear != previous_gear {
-            tracing::info!(from = previous_gear, to = inputs.gear, "gear selected");
-        }
 
         ui.add_space(18.0);
         self.calibration_controls(ui);
@@ -226,21 +183,6 @@ impl EngineApp {
         if let Some(error) = &self.audio_error {
             ui.colored_label(Color32::from_rgb(240, 170, 74), error);
         }
-        ui.add_space(8.0);
-        ui.collapsing("Diagnostics", |ui| {
-            ui.label("Daily logs:");
-            ui.label(
-                RichText::new(self.log_directory.display().to_string())
-                    .monospace()
-                    .small(),
-            );
-            ui.label("Crash report:");
-            ui.label(
-                RichText::new(self.crash_log_path.display().to_string())
-                    .monospace()
-                    .small(),
-            );
-        });
     }
 
     fn calibration_controls(&mut self, ui: &mut egui::Ui) {
@@ -300,16 +242,10 @@ impl EngineApp {
                 {
                     match self.simulation.update_config(self.draft_config.clone()) {
                         Ok(()) => {
-                            tracing::info!(
-                                displacement_cc = self.draft_config.displacement_cc,
-                                gear_ratios = ?self.draft_config.gearbox.gear_ratios,
-                                "live calibration applied"
-                            );
                             self.config_dirty = false;
                             self.config_message = Some((true, "Changes applied".to_owned()));
                         }
                         Err(error) => {
-                            tracing::warn!(%error, "live calibration rejected");
                             self.config_message = Some((false, error.to_string()));
                         }
                     }

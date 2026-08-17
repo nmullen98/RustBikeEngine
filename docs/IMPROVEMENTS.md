@@ -13,7 +13,7 @@ before the next layer is started.
   low-rpm threshold instead of an idle controller keeping it artificially alive.
 - Procedural audio tied to combustion, overrun, intake/exhaust resonance and output gearing.
 - Delayed throttle position and intake-manifold pressure with finite filling response.
-- Native GUI, keyboard controls, daily logs and crash reports.
+- Native GUI, keyboard controls and procedural audio.
 
 ## Current iteration
 

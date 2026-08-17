@@ -17,7 +17,6 @@ flowchart LR
 - `simulation`: deterministic, unit-testable SI-unit physics with no UI or audio dependency.
 - `audio`: allocation-free callback; it reads state through atomics and never locks the UI thread.
 - `app`: input, presentation, timing accumulator, and graceful audio failure handling.
-- `logging`: daily diagnostic logs plus a synchronous crash report and backtrace.
 
 The physics runs at a fixed 1 ms step. Rendering is approximately 60 Hz and cannot change the
 simulation result. Frame gaps are capped at 50 ms to avoid a runaway catch-up loop.
@@ -64,7 +63,6 @@ next stage starts.
 
 - Engine files are data only; they are never executed.
 - Every external numeric value must be finite, bounded and validated before entering the solver.
-- The audio callback must not allocate, lock, open files, log routinely or perform network I/O.
+- The audio callback must not allocate, lock, open files, log or perform network I/O.
 - Dependencies stay minimal; run `cargo quality`, `cargo verify` and dependency auditing in CI.
-- Generated recordings are ignored by Git to prevent accidentally committing large user files.
-- Logs avoid continuous telemetry and remain on the local machine.
+- The application stores no runtime state, diagnostics, recordings or crash reports.

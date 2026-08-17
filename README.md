@@ -10,7 +10,7 @@ This is an educational, deterministic lumped model—not an engineering certific
 - 1 kHz four-stroke crank, clutch, gearbox, tyre-load and road model.
 - Editable inline-four TOML profile with strict finite-range validation.
 - Traction-limited rear-wheel torque, engine braking, stalling, rolling resistance and aero drag.
-- Native `eframe` dashboard, keyboard controls, local diagnostics, and procedural CPAL audio.
+- Native `eframe` dashboard, keyboard controls, and procedural CPAL audio.
 - Regression tests for starting, redline, stalling, transient intake response, tyre force and travel.
 
 ## Requirements
@@ -66,15 +66,11 @@ rejected without changing the running model. Displacement scales torque, pumping
 inertia relative to the reference engine. GUI edits last for the current session; update the TOML
 profile to make them the next startup defaults.
 
-## Crash logs
+## Privacy
 
-Open **Diagnostics** in the left panel to see the exact log directory. The application writes:
-
-- `simulator.log.YYYY-MM-DD` — startup, engine state and audio/device events.
-- `crash.log` — synchronous panic details and a backtrace, preserved if the app crashes.
-
-On macOS these normally live under `~/Library/Application Support/` in the simulator's `logs`
-folder. Logs contain technical state only; engine control values are not continuously recorded.
+The simulator stores no runtime data. It does not create settings, input, log, telemetry or crash
+report files; it has no accounts and makes no network requests. Setup edits exist only for the
+current process and the bundled engine profile is embedded at compile time.
 
 ## Quality checks
 

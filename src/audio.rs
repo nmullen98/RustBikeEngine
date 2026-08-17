@@ -149,7 +149,7 @@ where
                     },
                 );
             },
-            |error| tracing::error!(%error, "audio stream error"),
+            |_| {},
             None,
         )
         .map_err(|error| format!("cannot create audio stream: {error}"))

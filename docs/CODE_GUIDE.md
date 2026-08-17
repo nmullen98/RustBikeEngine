@@ -9,8 +9,7 @@ TOML profile ──validate──> EngineSimulation ──snapshot──> egui d
 ```
 
 `src/lib.rs` exposes the documented library modules and denies undocumented public items.
-`src/main.rs` starts logging, installs the panic hook, creates the native window, and owns the
-application lifetime.
+`src/main.rs` creates the native window and owns the application lifetime.
 
 ## Source modules
 
@@ -19,8 +18,7 @@ application lifetime.
 | `src/config.rs` | TOML deserialisation, profile validation, derived reduction/inertia/load values. | Treat profiles as data only; reject non-finite and out-of-range values before simulation. |
 | `src/simulation.rs` | Deterministic 1 ms engine, intake, clutch, drivetrain, tyre-cap and travel-distance solver. | Keep SI units internally and add a regression test with every model change. |
 | `src/audio.rs` | Allocation-free CPAL callback and procedural firing/exhaust/intake/transmission sound. | The callback must not lock, allocate, log, open files, or perform I/O. |
-| `src/app.rs` | `egui` controls, fixed-step accumulator, setup editor, diagnostics and rendering. | Presentation must consume state; it must not change physics outside explicit inputs. |
-| `src/logging.rs` | Daily local logs and synchronous crash reports. | Log technical diagnostics only; never add credentials or continuous user telemetry. |
+| `src/app.rs` | `egui` controls, fixed-step accumulator, setup editor and rendering. | Presentation must consume state; it must not change physics outside explicit inputs. |
 | `src/main.rs` | Native application startup and shutdown policy. | Keep startup wiring small and keep physics in the library modules. |
 | `tests/engine_behaviour.rs` | Black-box behavioural regression tests. | Tests should express observable physical outcomes rather than private implementation details. |
 
