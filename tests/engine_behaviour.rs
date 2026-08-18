@@ -259,6 +259,50 @@ fn open_clutch_prevents_a_stationary_tall_gear_from_loading_the_engine() {
 }
 
 #[test]
+fn engine_temperature_rises_under_load_and_cools_when_stopped() {
+    let mut engine = EngineSimulation::new(EngineConfig::load_default().expect("valid engine"));
+    let ambient = engine.state().coolant_temperature_c;
+    engine.set_inputs(EngineInputs {
+        ignition: true,
+        starter: true,
+        throttle: 1.0,
+        ..EngineInputs::default()
+    });
+    run_steps(&mut engine, 20_000);
+    let hot = engine.state();
+    assert!(hot.coolant_temperature_c > ambient + 10.0);
+    assert!(hot.oil_temperature_c > ambient + 5.0);
+
+    engine.set_inputs(EngineInputs::default());
+    run_steps(&mut engine, 20_000);
+    assert!(engine.state().coolant_temperature_c < hot.coolant_temperature_c);
+}
+
+#[test]
+fn gear_change_applies_a_short_shift_cut_and_detects_clutchless_shift() {
+    let mut engine = EngineSimulation::new(EngineConfig::load_default().expect("valid engine"));
+    engine.set_inputs(EngineInputs {
+        ignition: true,
+        starter: true,
+        ..EngineInputs::default()
+    });
+    run_steps(&mut engine, 2_000);
+    engine.set_inputs(EngineInputs {
+        gear: 1,
+        clutch_engagement: 1.0,
+        throttle: 0.5,
+        ..EngineInputs::default()
+    });
+    assert!(!engine.state().shift_cut_active);
+    engine.step(0.001);
+    assert!(engine.state().shift_cut_active);
+    assert!(engine.state().shift_shock_nm > 0.0);
+    run_steps(&mut engine, 100);
+    assert!(!engine.gearbox_state().shift_in_progress);
+    assert!(engine.gearbox_state().clutchless_shift);
+}
+
+#[test]
 fn stationary_clutch_release_reports_gear_load_response() {
     for gear in 1..=6 {
         let mut engine = EngineSimulation::new(EngineConfig::load_default().expect("valid engine"));

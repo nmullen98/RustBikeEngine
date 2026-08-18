@@ -6,6 +6,7 @@ use std::time::Instant;
 
 const FIXED_STEP_SECONDS: f64 = 0.001;
 const MAX_FRAME_SECONDS: f64 = 0.05;
+const THROTTLE_STEP: f64 = 0.05;
 
 #[allow(clippy::struct_excessive_bools)]
 pub struct EngineApp {
@@ -73,16 +74,17 @@ impl EngineApp {
                     input.key_down(egui::Key::Space),
                     input.key_pressed(egui::Key::ArrowLeft),
                     input.key_pressed(egui::Key::ArrowRight),
-                    input.key_pressed(egui::Key::ArrowUp),
-                    input.key_pressed(egui::Key::ArrowDown),
+                    input.key_down(egui::Key::ArrowUp),
+                    input.key_down(egui::Key::ArrowDown),
                 )
             });
         let mut inputs = self.simulation.inputs();
         if throttle_up {
-            inputs.throttle = (inputs.throttle + 0.05).min(1.0);
-        }
-        if throttle_down {
-            inputs.throttle = (inputs.throttle - 0.05).max(0.0);
+            inputs.throttle = (inputs.throttle + THROTTLE_STEP).min(1.0);
+        } else if throttle_down {
+            inputs.throttle = (inputs.throttle - THROTTLE_STEP * 2.0).max(0.0);
+        } else {
+            inputs.throttle = (inputs.throttle - THROTTLE_STEP).max(0.0);
         }
         let shift_ready = space_down || inputs.clutch_engagement <= 0.1;
         if shift_ready && shift_down && inputs.gear > 0 {
@@ -270,6 +272,7 @@ impl EngineApp {
         });
     }
 
+    #[allow(clippy::too_many_lines)]
     fn dashboard(&self, ui: &mut egui::Ui) {
         let state = self.simulation.state();
         let gearbox = self.simulation.gearbox_state();
@@ -344,6 +347,27 @@ impl EngineApp {
                 "Clutch slip: {:+.0} rpm  •  release the clutch gradually to load the engine",
                 gearbox.clutch_slip_rpm
             ));
+        }
+        if state.shift_cut_active {
+            ui.colored_label(Color32::from_rgb(240, 170, 74), "SHIFT CUT");
+        } else if state.shift_shock_nm > 0.0 {
+            ui.colored_label(
+                Color32::from_rgb(240, 110, 92),
+                format!("Clutchless shift shock: {:.0} Nm", state.shift_shock_nm),
+            );
+        }
+        ui.small(format!(
+            "Temperatures: coolant {:.0}°C  •  oil {:.0}°C  •  clutch {:.0}°C  •  exhaust {:.0}°C",
+            state.coolant_temperature_c,
+            state.oil_temperature_c,
+            state.clutch_temperature_c,
+            state.exhaust_temperature_c,
+        ));
+        if state.overheating {
+            ui.colored_label(
+                Color32::from_rgb(226, 75, 70),
+                "OVERHEATING: power protection active",
+            );
         }
         ui.add_space(14.0);
         draw_engine(
